@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="11759" systemVersion="16D32" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Settings" representedClassName="Settings" codeGenerationType="class">
+        <attribute name="dataKey" optional="YES" attributeType="String" syncable="YES"/>
+        <attribute name="searchEngine" optional="YES" attributeType="String">
+            <userInfo/>
+        </attribute>
+        <attribute name="usePassword" optional="YES" attributeType="Boolean" usesScalarValueType="YES" syncable="YES"/>
+        <userInfo/>
+    </entity>
+    <elements>
+        <element name="Settings" positionX="261" positionY="189" width="128" height="90"/>
+    </elements>
+</model>

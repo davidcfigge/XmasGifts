@@ -1,0 +1,230 @@
+//
+//  MasterViewController.swift
+//  Xmas Gifts
+//
+//  Created by David Figge on 2/24/17.
+//
+//  This class is responsible for displaying the list of people to buy gifts for
+
+import UIKit
+import ContactsUI
+import Contacts
+
+class MasterViewController: UITableViewController, CNContactPickerDelegate, FirebaseDBListener, AuthenticationDelegate, DismissSubviewDelegate {
+
+    let CLASS_NAME = "MasterViewController"  // Unique identifier for GiftDatabaseListener
+    let cellReuseIdentifier = "peopleCell"
+    let nameLabelId = 101           // We use 3 items on the cell layout. Name, Picture, and PieChart
+    let pictureId = 103
+    let chartId = 104
+    var pieChart = PieChart()       // The pie chart that displays
+    var isMenuOpen = false          // Set if menu is open
+    var destination : UIViewController! = nil   // Allows didSelectRow to know the destination VC
+    var sorter = Sorter()
+    
+    @IBOutlet weak var pieView : UIView!
+    @IBOutlet weak var budgetSummary : UILabel!
+    @IBOutlet weak var plusButton : UIButton!
+    @IBOutlet weak var settingsButton : UIButton!
+    @IBOutlet weak var menuButton : UIButton!
+    
+    // Called by the GiftDatabase if the data has changed
+    func onFirebaseDBChanged() {
+        updateDisplay()
+    }
+    
+    // Called by the AppDelegate when re-launching. If enough time has passed, force the login page to be displayed
+    public func presentAuthenticationViewController() {
+        performSegue(withIdentifier: "People2Login", sender: self)
+    }
+    
+    // Called by the AppDelegate as we are being placed into the background. Forces subviews to be removed. This is for
+    // 2 reasons. First, when you start up again you will be at a more central point in the user experience. Second, it
+    // allows for only 2 views (Master and Detail/GiftList) to be required to be able to present the login view controller
+    public func dismissSubviews() {
+        if presentedViewController != nil && presentedViewController is DismissSubviewDelegate {
+            let controller = presentedViewController as! DismissSubviewDelegate
+            controller.dismissSubviews()
+        }
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        People.initialize() // Note that the database needs to be initialized here, not on class load
+
+        navigationController?.isNavigationBarHidden = true  // We don't use the navigation controller visuals
+        
+        updatePieChart()
+        pieChart.show(host:pieView)
+        
+        navigationController?.isNavigationBarHidden = true // Keep the navigation bar hidden
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if !AuthenticationViewController.isAuthenticated {  // This ensures that on first run the login controller is displayed
+            performSegue(withIdentifier: "People2Login", sender: self)
+        }
+        self.clearsSelectionOnViewWillAppear = self.splitViewController!.isCollapsed // Keep collapsed view on iPad
+        People.addListener(listener:self as FirebaseDBListener, className:CLASS_NAME)   // Listen for data changes
+        updateDisplay()
+    }
+
+    // Update the display elements associated with the data (which are most of them)
+    func updateDisplay() {
+        tableView.reloadData()              // Reload the data for the list of people
+        updatePieChart()                    // Update the pie chart data
+        pieChart.show(host:pieView)         // Display the pie chart in its view
+        budgetSummary.text = DataUtils.getSummaryString()    // Display the summary text
+        updateSorting()
+    }
+    
+    // The Sorter object is used to provide flexible sorting options for the table view
+    // Two closures are specified on initialization. One returns objects by index, and
+    // the other returns the appropriate key and title for the table view.
+    func updateSorting() {
+        sorter = Sorter(retrieveDataObject: { (index) -> Any? in
+            return People.Entries[index]
+        }, extractKeyFromDataObject: { (obj) -> (String?, String?) in
+            let person = obj as! Person
+            return (person.getKey(), person.FirstName + " " + person.LastName)
+        })
+    }
+    
+    override func viewWillDisappear(_ animated: Bool) {
+        People.removeListener(className: CLASS_NAME)  // Stop listening for data changes
+        super.viewWillDisappear(animated)
+    }
+    
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        // Dispose of any resources that can be recreated.
+    }
+
+    func updatePieChart() {
+        pieChart.reset()                        // Erase existing data
+        for name in People.keys {
+            let person = People.Entries[name]
+            pieChart.addSegment(title:name, value:CGFloat(DataUtils.getDollarInt(amount: (person?.spent())!)))
+        }
+        // Add in the "remaining" segment
+        pieChart.addSegment(title:"Remaining", value:CGFloat(DataUtils.getDollarInt(amount:DataUtils.getBudgetRemaining())), color:UIColor.lightGray)
+    }
+    
+    // MARK: - Segues
+
+    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
+        switch (segue.identifier!) {
+        case "People2Person" :
+            let navController = segue.destination as! UINavigationController
+            destination = navController.visibleViewController       // Set the destination view controller for didSelectRow
+        default:
+            break;
+        }
+    }
+    
+    @IBAction func settings() {
+        closeMenu()     // Close the menu before display the settings view
+    }
+    
+    // Add a new person to the database
+    @IBAction func addPerson() {
+        closeMenu()
+        let contactPicker = CNContactPickerViewController()
+        contactPicker.delegate = self
+        self.present(contactPicker, animated: true, completion: nil)
+    }
+    
+    func openMenu() {
+        if !isMenuOpen {
+            onMenu()
+        }
+    }
+    
+    func closeMenu() {
+        if isMenuOpen {
+            onMenu()
+        }
+    }
+    
+    // Toggle the menu open and closed
+    @IBAction func onMenu() {
+        isMenuOpen = !isMenuOpen
+        let buttonsHidden = isMenuOpen ? false : true
+        settingsButton.isHidden = buttonsHidden
+        plusButton.isHidden = buttonsHidden
+        menuButton.setImage(getMenuImage(), for: UIControlState.normal)
+    }
+    
+    func getMenuImage() -> UIImage! {
+        if isMenuOpen {
+            return UIImage(named: "close-circle")
+        }
+        return UIImage(named: "menu-circle")
+    }
+    
+    // Process what happens when a contact is selected
+    func contactPicker(_ picker: CNContactPickerViewController, didSelect contact: CNContact) {
+        picker.dismiss(animated: true, completion: nil)
+        let person = Person(firstName:contact.givenName, lastName:contact.familyName, id: contact.identifier)
+        People.addPerson(person: person)
+    }
+    
+    // MARK: - Table View
+
+    override func numberOfSections(in tableView: UITableView) -> Int {
+        return 1        // We only display one section
+    }
+
+    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        return People.Count
+    }
+
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        // create a new cell if needed or reuse an old one
+        let cell:UITableViewCell = tableView.dequeueReusableCell(withIdentifier: cellReuseIdentifier) as UITableViewCell!
+        
+        // set the text from the data
+        let dataIndex = indexPath.row
+        let nameLabel = cell.viewWithTag(nameLabelId) as! UILabel
+        let pictureView = cell.viewWithTag(pictureId) as! UIImageView
+        let chartView = cell.viewWithTag(chartId)! as UIView
+        let person = People.Entries[sorter.keyFromIndex(index: dataIndex)!]
+        let key = person!.FullName
+        let photo = person!.Photo as UIImage!
+        nameLabel.text = person?.FirstName
+        nameLabel.textColor = pieChart.getSegmentColor(title:key)
+        let pie = PieChart()
+        pie.addSegment(title: "spent",value: CGFloat(person!.spent()))
+        pie.addSegment(title: "remaining", value: CGFloat(person!.getBudgetRemaining()), color:UIColor.lightGray)
+        pie.show(host:chartView)
+        if (photo != nil) {
+            pictureView.image = photo
+            pictureView.layer.borderWidth=1.0
+            pictureView.layer.masksToBounds = false
+            pictureView.layer.borderColor = UIColor.clear.cgColor
+            pictureView.layer.cornerRadius = 13
+            pictureView.layer.cornerRadius = pictureView.frame.size.height/2
+            pictureView.clipsToBounds = true
+        } else {
+            pictureView.image = nil
+        }
+        return cell
+    }
+
+    // method to run when table view cell is tapped
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        closeMenu()
+        if destination != nil {
+            let giftListViewController = destination as! GiftListViewController
+            let subject = People.Entries[sorter.keyFromIndex(index:indexPath.row)!]
+            giftListViewController.selectedName = subject!.FullName
+            let backItem = UIBarButtonItem()
+            backItem.title = subject!.FirstName
+            navigationItem.backBarButtonItem = backItem // This will show in the next view controller being pushed
+            destination = nil
+        }
+    }
+    
+}
+
